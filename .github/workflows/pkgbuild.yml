@@ -99,7 +99,14 @@ jobs:
             "${{ matrix.docker_image }}" \
             bash -c "
               set -e
+              
+              echo '=== Fixing Keyring ==='
+              # Initialize the gnupg store and populate keys to fix the signature error
+              pacman-key --init
+              pacman-key --populate archlinux cachyos
+
               echo '=== Updating system ==='
+              # Now that keys are populated, we can sync and update
               pacman -Syu --noconfirm
 
               echo '=== Installing build dependencies ==='
@@ -112,7 +119,6 @@ jobs:
 
               echo '=== Building package ==='
               cd /pkg
-              # Injecting your march flags via environment variables as per standard makepkg practice
               export CFLAGS='${{ matrix.march_flag }} -O3 -pipe'
               export CXXFLAGS='${{ matrix.march_flag }} -O3 -pipe'
               
