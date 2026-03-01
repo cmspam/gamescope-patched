@@ -1,0 +1,146 @@
+name: Build and Publish Gamescope
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC
+    - cron: '0 18 * * *'  # 18:00 UTC
+  workflow_dispatch:
+
+jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      needs_build: ${{ steps.check.outputs.needs_build }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get Latest Version and Check
+        id: check
+        run: |
+          # Fetch PKGBUILD from CachyOS repo
+          curl -sfL "https://raw.githubusercontent.com/CachyOS/CachyOS-PKGBUILDS/master/handheld/gamescope/PKGBUILD" -o PKGBUILD_REMOTE
+          
+          NEW_VER=$(grep "pkgver=" PKGBUILD_REMOTE | cut -d= -f2)
+          NEW_REL=$(grep "pkgrel=" PKGBUILD_REMOTE | cut -d= -f2)
+          FULL_VER="${NEW_VER}-${NEW_REL}"
+          
+          LAST_VER=$(cat last_built_version.txt 2>/dev/null || echo "")
+          
+          echo "tag=$FULL_VER" >> "$GITHUB_OUTPUT"
+          if [ "$FULL_VER" == "$LAST_VER" ]; then
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: get-version
+    if: needs.get-version.outputs.needs_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        include:
+          - target: v3
+            docker_image: cachyos/cachyos-v3
+            march_flag: "-march=x86-64-v3"
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Prepare Build Directory
+        run: |
+          mkdir -p build
+          curl -sfL "https://raw.githubusercontent.com/CachyOS/CachyOS-PKGBUILDS/master/handheld/gamescope/PKGBUILD" -o build/PKGBUILD
+          cp fix-nvidia.patch build/
+
+      - name: Inject Patch into PKGBUILD
+        run: |
+          cat > inject_gamescope.py << 'PYEOF'
+          import sys
+
+          with open('build/PKGBUILD', 'r') as f:
+              lines = f.readlines()
+
+          # 1. Add patch to source
+          for i, line in enumerate(lines):
+              if line.startswith('source=('):
+                  lines.insert(i + 1, "  'fix-nvidia.patch'\n")
+                  break
+
+          # 2. Add SKIP to b2sums
+          for i, line in enumerate(lines):
+              if line.startswith('b2sums=('):
+                  lines.insert(i + 1, "  'SKIP'\n")
+                  break
+
+          # 3. Add patch command to prepare()
+          for i, line in enumerate(lines):
+              if line.startswith('prepare() {'):
+                  lines.insert(i + 2, "  patch -Np1 -d gamescope -i ../fix-nvidia.patch\n")
+                  break
+
+          with open('build/PKGBUILD', 'w') as f:
+              f.writelines(lines)
+          PYEOF
+          python3 inject_gamescope.py
+
+      - name: Build in Docker
+        run: |
+          docker run --rm \
+            --privileged \
+            -v "$PWD/build:/pkg" \
+            "${{ matrix.docker_image }}" \
+            bash -c "
+              pacman -Syu --noconfirm --needed base-devel
+              useradd -m builder
+              echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+              chown -R builder:builder /pkg
+              cd /pkg
+              # Export march flags for the build
+              export CFLAGS='${{ matrix.march_flag }} -O3 -pipe'
+              export CXXFLAGS='${{ matrix.march_flag }} -O3 -pipe'
+              sudo -u builder makepkg -sf --noconfirm
+            "
+
+      - name: Generate Repo Database
+        run: |
+          REPO_NAME="gamescope-patched-${{ matrix.target }}"
+          mkdir -p /tmp/repo
+          cp build/*.pkg.tar.zst /tmp/repo/
+          cd /tmp/repo
+          repo-add ${REPO_NAME}.db.tar.gz *.pkg.tar.zst
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="latest-${{ matrix.target }}"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+          
+          gh release create "$TAG" \
+            --title "Gamescope Patched (${{ matrix.target }})" \
+            --notes "Contains fix-nvidia.patch for Steam Remote Play." \
+            build/*.pkg.tar.zst /tmp/repo/*.db* /tmp/repo/*.files*
+
+  record:
+    needs: [get-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "${{ needs.get-version.outputs.tag }}" > last_built_version.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_built_version.txt
+          git commit -m "chore: update version [skip ci]" || exit 0
+          git push
