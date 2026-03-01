@@ -99,30 +99,23 @@ jobs:
             "${{ matrix.docker_image }}" \
             bash -c "
               set -e
-              echo '=== Initializing Keyring and System ==='
-              # Force update the database and the keyring first
-              pacman -Sy --noconfirm archlinux-keyring cachyos-keyring
-              
-              echo '=== Full System Upgrade ==='
-              # Perform a full upgrade to prevent library mismatches
+              echo '=== Updating system ==='
               pacman -Syu --noconfirm
-              
-              echo '=== Installing Build Base ==='
+
+              echo '=== Installing build dependencies ==='
               pacman -S --noconfirm --needed base-devel git
-              
-              echo '=== Setting up Build User ==='
+
+              echo '=== Setting up build user ==='
               useradd -m builder
               echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
               chown -R builder:builder /pkg
-              
-              echo '=== Building Gamescope ==='
+
+              echo '=== Building package ==='
               cd /pkg
+              # Injecting your march flags via environment variables as per standard makepkg practice
               export CFLAGS='${{ matrix.march_flag }} -O3 -pipe'
               export CXXFLAGS='${{ matrix.march_flag }} -O3 -pipe'
               
-              # Run makepkg as the builder user
-              # -s: install missing dependencies
-              # -f: force overwrite existing packages
               sudo -u builder makepkg -sf --noconfirm
             "
             
