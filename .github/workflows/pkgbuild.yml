@@ -98,17 +98,34 @@ jobs:
             -v "$PWD/build:/pkg" \
             "${{ matrix.docker_image }}" \
             bash -c "
-              pacman -Syu --noconfirm --needed base-devel
+              set -e
+              echo '=== Initializing Keyring and System ==='
+              # Force update the database and the keyring first
+              pacman -Sy --noconfirm archlinux-keyring cachyos-keyring
+              
+              echo '=== Full System Upgrade ==='
+              # Perform a full upgrade to prevent library mismatches
+              pacman -Syu --noconfirm
+              
+              echo '=== Installing Build Base ==='
+              pacman -S --noconfirm --needed base-devel git
+              
+              echo '=== Setting up Build User ==='
               useradd -m builder
               echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
               chown -R builder:builder /pkg
+              
+              echo '=== Building Gamescope ==='
               cd /pkg
-              # Export march flags for the build
               export CFLAGS='${{ matrix.march_flag }} -O3 -pipe'
               export CXXFLAGS='${{ matrix.march_flag }} -O3 -pipe'
+              
+              # Run makepkg as the builder user
+              # -s: install missing dependencies
+              # -f: force overwrite existing packages
               sudo -u builder makepkg -sf --noconfirm
             "
-
+            
       - name: Generate Repo Database
         run: |
           REPO_NAME="gamescope-patched-${{ matrix.target }}"
