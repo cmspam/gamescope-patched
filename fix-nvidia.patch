@@ -1,9 +1,9 @@
-From 07d52c046dbaacd1deda83244687a22bc995798d Mon Sep 17 00:00:00 2001
+From 8558734a482a1372b156b9e0cc0181f25bbcc41d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=D0=9C=2E=20=D0=A7=D0=B0=D1=80=D0=BB=D1=8C=D0=B7?=
  <charlesmillerspam@gmail.com>
-Date: Sun, 22 Feb 2026 22:27:13 +0900
+Date: Thu, 16 Apr 2026 05:56:15 +0900
 Subject: [PATCH] Fix black screen and inverted R/B colours when streaming via
- Steam Remote Play  on NVIDIA
+ Steam Remote Play on NVIDIA
 
 ---
  src/rendervulkan.cpp | 7 +++++++
@@ -12,7 +12,7 @@ Subject: [PATCH] Fix black screen and inverted R/B colours when streaming via
  3 files changed, 17 insertions(+), 1 deletion(-)
 
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 65411dcfa3..cbcee8e7ff 100644
+index 65411dc..cbcee8e 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
 @@ -471,8 +471,12 @@ bool CVulkanDevice::createDevice()
@@ -46,10 +46,10 @@ index 65411dcfa3..cbcee8e7ff 100644
  				screenshotImageFlags.bExportable = true;
  				screenshotImageFlags.bLinear = true; // TODO: support multi-planar DMA-BUF export via PipeWire
 diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
-index 63cc6029ac..ebf1dff3a5 100644
+index 63cc602..ebf1dff 100644
 --- a/src/rendervulkan.hpp
 +++ b/src/rendervulkan.hpp
-@@ -804,6 +804,7 @@ class CVulkanDevice
+@@ -804,6 +804,7 @@ public:
  	inline bool hasDrmPrimaryDevId() {return m_bHasDrmPrimaryDevId;}
  	inline dev_t primaryDevId() {return m_drmPrimaryDevId;}
  	inline bool supportsFp16() {return m_bSupportsFp16;}
@@ -57,7 +57,7 @@ index 63cc6029ac..ebf1dff3a5 100644
  
  	inline std::pair<void *, uint32_t> uploadBufferData(uint32_t size)
  	{
-@@ -867,6 +868,7 @@ class CVulkanDevice
+@@ -867,6 +868,7 @@ protected:
  	bool m_bSupportsFp16 = false;
  	bool m_bHasDrmPrimaryDevId = false;
  	bool m_bSupportsModifiers = false;
@@ -66,12 +66,12 @@ index 63cc6029ac..ebf1dff3a5 100644
  
  
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 644833647a..2f98029866 100644
+index c4cee70..8942517 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -2391,8 +2391,15 @@ static void paint_pipewire()
- 	if ( pFocus->overrideWindow && !pFocus->focusWindow->isSteamStreamingClient )
- 		paint_window( pFocus->overrideWindow, pFocus->focusWindow, &frameInfo, nullptr, PaintWindowFlag::NoFilter, 1.0f, pFocus->overrideWindow );
+@@ -2395,8 +2395,15 @@ static void paint_pipewire()
+ 				( cv_overlay_unmultiplied_alpha ? PaintWindowFlag::CoverageMode : 0 )  );
+ 	}
  
 +	// On the NVIDIA proprietary driver, sampling VK_FORMAT_A2R10G10B10_UNORM_PACK32
 +	// (DRM_FORMAT_XRGB2101010) storage images returns R and B swapped, causing colour
@@ -86,3 +86,6 @@ index 644833647a..2f98029866 100644
  		: gamescope::Rc<CVulkanTexture>{ s_pPipewireBuffer->texture };
  
  	gamescope::Rc<CVulkanTexture> pYUVTexture = s_pPipewireBuffer->texture->isYcbcr() ? s_pPipewireBuffer->texture : nullptr;
+-- 
+2.53.0
+
