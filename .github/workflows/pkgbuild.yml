@@ -65,13 +65,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Download Gamescope PKGBUILD
+      - name: Download Gamescope PKGBUILD and supporting files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p build
-          # Download the PKGBUILD and all supporting files (install, etc)
-          # Gamescope usually only has the PKGBUILD in this directory
-          curl -sfL "https://raw.githubusercontent.com/CachyOS/CachyOS-PKGBUILDS/master/handheld/gamescope/PKGBUILD" -o build/PKGBUILD
-          echo "PKGBUILD downloaded."
+          # Download every file in the CachyOS gamescope directory so that any
+          # patches referenced by the PKGBUILD's source array are present.
+          gh api repos/CachyOS/CachyOS-PKGBUILDS/contents/handheld/gamescope \
+            --jq '.[] | select(.type=="file") | "\(.name)\t\(.download_url)"' \
+          | while IFS=$'\t' read -r name url; do
+              echo "Fetching $name"
+              curl -sfL "$url" -o "build/$name"
+            done
+          echo "Files in build/:"
+          ls -la build/
 
       - name: Download custom patch
         run: |
