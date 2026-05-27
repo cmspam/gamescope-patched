@@ -1,7 +1,7 @@
-From 8558734a482a1372b156b9e0cc0181f25bbcc41d Mon Sep 17 00:00:00 2001
+From af288e8afcebd248839126c5d9e04718851bdc98 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=D0=9C=2E=20=D0=A7=D0=B0=D1=80=D0=BB=D1=8C=D0=B7?=
  <charlesmillerspam@gmail.com>
-Date: Thu, 16 Apr 2026 05:56:15 +0900
+Date: Thu, 28 May 2026 00:19:13 +0900
 Subject: [PATCH] Fix black screen and inverted R/B colours when streaming via
  Steam Remote Play on NVIDIA
 
@@ -12,13 +12,13 @@ Subject: [PATCH] Fix black screen and inverted R/B colours when streaming via
  3 files changed, 17 insertions(+), 1 deletion(-)
 
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 65411dc..cbcee8e 100644
+index aefc6b2..c86dea2 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -471,8 +471,12 @@ bool CVulkanDevice::createDevice()
- 	// We need to refactor some Vulkan stuff to do that though.
- 	if ( hasDrmProps )
- 	{
+@@ -466,8 +466,12 @@ bool CVulkanDevice::createDevice()
+ 		vk_log.warnf( "physical device doesn't support VK_EXT_physical_device_drm" );
+ 	} else {
+ #if HAVE_DRM
 +		VkPhysicalDeviceDriverProperties driverProps = {
 +			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
 +		};
@@ -28,7 +28,7 @@ index 65411dc..cbcee8e 100644
  		};
  		VkPhysicalDeviceProperties2 props2 = {
  			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-@@ -480,6 +484,8 @@ bool CVulkanDevice::createDevice()
+@@ -475,6 +479,8 @@ bool CVulkanDevice::createDevice()
  		};
  		vk.GetPhysicalDeviceProperties2( physDev(), &props2 );
  
@@ -37,27 +37,27 @@ index 65411dc..cbcee8e 100644
  		if ( !GetBackend()->UsesVulkanSwapchain() && !drmProps.hasPrimary ) {
  			vk_log.errorf( "physical device has no primary node" );
  			return false;
-@@ -3613,6 +3619,7 @@ gamescope::Rc<CVulkanTexture> vulkan_acquire_screenshot_texture(uint32_t width,
- 			screenshotImageFlags.bMappable = true;
- 			screenshotImageFlags.bTransferDst = true;
- 			screenshotImageFlags.bStorage = true;
-+			screenshotImageFlags.bSampled = true; // required for RGB-to-NV12 shader to sample this texture
+@@ -3639,6 +3645,7 @@ static gamescope::Rc<CVulkanTexture> acquire_pooled_texture( auto& pool, uint32_
+ 			textureFlags.bMappable = true;
+ 			textureFlags.bTransferDst = true;
+ 			textureFlags.bStorage = true;
++			textureFlags.bSampled = true; // required for RGB-to-NV12 shader to sample this texture
  			if (exportable || drmFormat == DRM_FORMAT_NV12) {
- 				screenshotImageFlags.bExportable = true;
- 				screenshotImageFlags.bLinear = true; // TODO: support multi-planar DMA-BUF export via PipeWire
+ 				textureFlags.bExportable = true;
+ 				textureFlags.bLinear = true; // TODO: support multi-planar DMA-BUF export via PipeWire
 diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
-index 63cc602..ebf1dff 100644
+index b0ee208..93df422 100644
 --- a/src/rendervulkan.hpp
 +++ b/src/rendervulkan.hpp
-@@ -804,6 +804,7 @@ public:
+@@ -806,6 +806,7 @@ public:
  	inline bool hasDrmPrimaryDevId() {return m_bHasDrmPrimaryDevId;}
  	inline dev_t primaryDevId() {return m_drmPrimaryDevId;}
  	inline bool supportsFp16() {return m_bSupportsFp16;}
 +	inline bool isNvidiaProprietaryDriver() {return m_bIsNvidiaProprietaryDriver;}
+ 	inline std::vector<VkExtensionProperties>& supportedExtensions() {return m_supportedExts;}
  
  	inline std::pair<void *, uint32_t> uploadBufferData(uint32_t size)
- 	{
-@@ -867,6 +868,7 @@ protected:
+@@ -870,6 +871,7 @@ protected:
  	bool m_bSupportsFp16 = false;
  	bool m_bHasDrmPrimaryDevId = false;
  	bool m_bSupportsModifiers = false;
@@ -66,10 +66,10 @@ index 63cc602..ebf1dff 100644
  
  
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index c4cee70..8942517 100644
+index b64d459..6ba6245 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -2395,8 +2395,15 @@ static void paint_pipewire()
+@@ -2404,8 +2404,15 @@ static void paint_pipewire()
  				( cv_overlay_unmultiplied_alpha ? PaintWindowFlag::CoverageMode : 0 )  );
  	}
  
@@ -81,11 +81,11 @@ index c4cee70..8942517 100644
 +	const uint32_t uRGBCaptureFormat = g_device.isNvidiaProprietaryDriver()
 +		? DRM_FORMAT_XBGR2101010 : DRM_FORMAT_XRGB2101010;
  	gamescope::Rc<CVulkanTexture> pRGBTexture = s_pPipewireBuffer->texture->isYcbcr()
--		? vulkan_acquire_screenshot_texture( uWidth, uHeight, false, DRM_FORMAT_XRGB2101010 )
-+		? vulkan_acquire_screenshot_texture( uWidth, uHeight, false, uRGBCaptureFormat )
+-		? vulkan_acquire_capture_texture( uWidth, uHeight, false, DRM_FORMAT_XRGB2101010 )
++		? vulkan_acquire_capture_texture( uWidth, uHeight, false, uRGBCaptureFormat )
  		: gamescope::Rc<CVulkanTexture>{ s_pPipewireBuffer->texture };
  
  	gamescope::Rc<CVulkanTexture> pYUVTexture = s_pPipewireBuffer->texture->isYcbcr() ? s_pPipewireBuffer->texture : nullptr;
 -- 
-2.53.0
+2.54.0
 
