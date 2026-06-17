@@ -222,29 +222,58 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Retry wrapper: api.github.com returns transient 5xx often
+          # enough that a single attempt leaves successful builds
+          # unpublished. Exponential backoff over ~5 attempts.
+          retry() {
+              local n=0 max=5 delay=5
+              until "$@"; do
+                  n=$((n + 1))
+                  if [ "$n" -ge "$max" ]; then
+                      echo "Command failed after $max attempts: $*" >&2
+                      return 1
+                  fi
+                  echo "Attempt $n failed; retrying in ${delay}s..." >&2
+                  sleep "$delay"
+                  delay=$((delay * 2))
+              done
+          }
+
           TAG="${{ needs.get-version.outputs.tag }}"
           VERSIONED_TAG="${TAG}-${{ matrix.target }}"
 
-          gh release delete "$VERSIONED_TAG" --yes 2>/dev/null || true
-          git push origin ":refs/tags/$VERSIONED_TAG" 2>/dev/null || true
-
-          gh release create "$VERSIONED_TAG" \
+          # Create the release once (idempotent: ignore "already exists"),
+          # then upload assets with --clobber. This survives a retry after
+          # a partial failure without ever leaving the tag release-less.
+          retry gh release create "$VERSIONED_TAG" \
             --title "Gamescope ${TAG} (${{ matrix.target }})" \
             --notes "Gamescope \`${TAG}\` with fix-nvidia.patch applied." \
-            build/*.pkg.tar.zst
+            || gh release view "$VERSIONED_TAG" >/dev/null
+          retry gh release upload "$VERSIONED_TAG" --clobber build/*.pkg.tar.zst
 
       - name: Update latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          retry() {
+              local n=0 max=5 delay=5
+              until "$@"; do
+                  n=$((n + 1))
+                  if [ "$n" -ge "$max" ]; then
+                      echo "Command failed after $max attempts: $*" >&2
+                      return 1
+                  fi
+                  echo "Attempt $n failed; retrying in ${delay}s..." >&2
+                  sleep "$delay"
+                  delay=$((delay * 2))
+              done
+          }
+
           TAG="${{ needs.get-version.outputs.tag }}"
           LATEST_TAG="latest-${{ matrix.target }}"
           REPO_NAME="gamescope-patched-${{ matrix.target }}"
 
-          gh release delete "$LATEST_TAG" --yes 2>/dev/null || true
-          git push origin ":refs/tags/$LATEST_TAG" 2>/dev/null || true
-
-          gh release create "$LATEST_TAG" \
+          retry gh release create "$LATEST_TAG" \
             --title "Gamescope latest (${{ matrix.target }}) — ${TAG}" \
             --notes "## pacman.conf
             \`\`\`ini
@@ -252,6 +281,14 @@ jobs:
             SigLevel = Optional
             Server = https://github.com/cmspam/gamescope-patched/releases/download/${LATEST_TAG}
             \`\`\`" \
+            || gh release view "$LATEST_TAG" >/dev/null
+
+          # Refresh the title to the current TAG even when the release
+          # already existed from a prior run.
+          retry gh release edit "$LATEST_TAG" \
+            --title "Gamescope latest (${{ matrix.target }}) — ${TAG}"
+
+          retry gh release upload "$LATEST_TAG" --clobber \
             build/*.pkg.tar.zst \
             /tmp/repo/${REPO_NAME}.db.tar.gz \
             /tmp/repo/${REPO_NAME}.db \
